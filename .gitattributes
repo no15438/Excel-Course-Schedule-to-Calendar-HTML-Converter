@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+build/gui_launcher/gui_launcher.pkg filter=lfs diff=lfs merge=lfs -text
+dist/gui_launcher filter=lfs diff=lfs merge=lfs -text
+dist/gui_launcher.app filter=lfs diff=lfs merge=lfs -text
