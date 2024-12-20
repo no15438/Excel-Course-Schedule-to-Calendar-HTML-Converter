@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import random
 import os
+import re
 import pytz
 from icalendar import Calendar, Event
 import warnings
@@ -56,11 +57,9 @@ def parse_meeting_pattern(pattern):
 
                 # Parse date range
                 date_range = parts[0]
-                date_parts = date_range.split('-')
-                if len(date_parts) != 2:
-                    continue
-                start_date = date_parts[0].strip()
-                end_date = date_parts[1].strip()
+                date_parts = re.split(r'[/-]', date_range)  # Support '/' or '-' as separators
+                start_date = '-'.join(date_parts[:3]).strip()
+                end_date = '-'.join(date_parts[3:]).strip()
 
                 # Parse days and times
                 day_time = parts[1]
@@ -69,8 +68,11 @@ def parse_meeting_pattern(pattern):
                 time_parts = parts[2].strip().split('-')
                 if len(time_parts) != 2:
                     continue
-                start_time = time_parts[0].strip()
-                end_time = time_parts[1].strip()
+
+                # Detect and parse time format
+                time_format = "%I:%M %p" if "a.m." in time_parts[0] or "p.m." in time_parts[0] else "%H:%M"
+                start_time = datetime.strptime(time_parts[0].replace('a.m.', 'AM').replace('p.m.', 'PM').strip(), time_format).strftime("%H:%M")
+                end_time = datetime.strptime(time_parts[1].replace('a.m.', 'AM').replace('p.m.', 'PM').strip(), time_format).strftime("%H:%M")
 
                 # Get location
                 location = parts[3].strip() if len(parts) > 3 else ""
@@ -85,7 +87,6 @@ def parse_meeting_pattern(pattern):
                         'end_time': end_time,
                         'location': location
                     })
-                    print(f"Added meeting: {day} {start_time}-{end_time} at {location}")
 
             except Exception as block_error:
                 print(f"Error processing block: {block_error}")
@@ -96,7 +97,7 @@ def parse_meeting_pattern(pattern):
     except Exception as e:
         print(f"Error in parse_meeting_pattern: {e}")
         return []
-
+    
 def get_term_dates(term):
     """Get start and end dates for the specified term"""
     if term.lower() == 'term1':
@@ -109,7 +110,9 @@ def get_term_dates(term):
 def is_in_term(start_date, term):
     """Check if a course is in the selected term"""
     try:
-        course_date = datetime.strptime(start_date, '%Y/%m/%d')
+        # Normalize date format to handle both '-' and '/'
+        normalized_date = start_date.replace('/', '-')
+        course_date = datetime.strptime(normalized_date, '%Y-%m-%d')
         
         if term == 'term1':
             term_start = datetime(2024, 9, 3)
@@ -120,9 +123,9 @@ def is_in_term(start_date, term):
             
         return term_start <= course_date <= term_end
     except Exception as e:
-        print(f"Error checking term: {e}")
+        print(f"Error checking term for date '{start_date}': {e}")
         return False
-
+        
 def generate_course_calendar(df, selected_term):
     """Generate HTML calendar from course data"""
     schedule = {
@@ -419,11 +422,7 @@ def generate_ics_calendar(df, term_start, term_end, selected_term):
                     
                     # Create event
                     event = Event()
-                    # Add course type to summary if it's a lab
-                    if course_type.lower() == 'laboratory':
-                        event.add('summary', f"{course_name} (Lab)")
-                    else:
-                        event.add('summary', course_name)
+                    event.add('summary', course_name)
                     
                     # Add detailed description
                     description = (
@@ -436,32 +435,21 @@ def generate_ics_calendar(df, term_start, term_end, selected_term):
                     event.add('description', description)
                     event.add('location', meeting['location'])
                     
-                    # Parse dates and times
-                    start_date = datetime.strptime(meeting['start_date'], '%Y/%m/%d')
-                    end_date = datetime.strptime(meeting['end_date'], '%Y/%m/%d')
+                    # Parse times
+                    start_time = datetime.strptime(meeting['start_time'], '%H:%M').time()
+                    end_time = datetime.strptime(meeting['end_time'], '%H:%M').time()
                     
-                    # Get day number (0 = Monday)
-                    day_map = {
-                        'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4
-                    }
+                    # Combine date and time
+                    day_map = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4}
                     day_num = day_map.get(meeting['day'])
                     if day_num is None:
                         continue
                     
                     # Find first occurrence of this day
-                    current_date = start_date
+                    current_date = datetime.strptime(meeting['start_date'], '%Y-%m-%d')
                     while current_date.weekday() != day_num:
                         current_date += timedelta(days=1)
                     
-                    # Parse times
-                    try:
-                        start_time = datetime.strptime(meeting['start_time'], '%H:%M').time()
-                        end_time = datetime.strptime(meeting['end_time'], '%H:%M').time()
-                    except ValueError:
-                        print(f"Error parsing time for {course_name}")
-                        continue
-                    
-                    # Combine date and time
                     event_start = datetime.combine(current_date.date(), start_time)
                     event_end = datetime.combine(current_date.date(), end_time)
                     
@@ -472,15 +460,15 @@ def generate_ics_calendar(df, term_start, term_end, selected_term):
                     event.add('dtstart', event_start)
                     event.add('dtend', event_end)
                     
-                    # Set up weekly recurrence until the section end date
+                    # Set recurrence rule to term end date
+                    term_end_date = tz.localize(datetime.strptime(term_end, '%Y/%m/%d'))
                     event.add('rrule', {
                         'freq': 'weekly',
-                        'until': tz.localize(datetime.combine(end_date.date(), end_time)),
+                        'until': term_end_date,
                         'byday': meeting['day'][:2].upper()
                     })
                     
                     cal.add_component(event)
-                    print(f"Added {course_type} event for {course_name} on {meeting['day']}")
                     
                 except Exception as event_error:
                     print(f"Error creating event for {course_name}: {event_error}")
