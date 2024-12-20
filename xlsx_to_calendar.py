@@ -394,14 +394,13 @@ def generate_ics_calendar(df, term_start, term_end, selected_term):
     
     for _, row in df.iterrows():
         try:
-            course_name = str(row['Course Listing'])
+            section_name = str(row['Section'])  # Use section name for event title
             meeting_pattern = str(row['Meeting Patterns'])
             
             if pd.isna(meeting_pattern):
                 continue
             
             # Get additional information
-            section = str(row.get('Section', ''))
             course_type = str(row.get('Instructional Format', ''))
             instructor = str(row.get('Instructor', ''))
             
@@ -415,20 +414,19 @@ def generate_ics_calendar(df, term_start, term_end, selected_term):
                         continue
                     
                     # Create unique event identifier
-                    event_key = f"{course_name}_{meeting['day']}_{meeting['start_time']}_{meeting['location']}"
+                    event_key = f"{section_name}_{meeting['day']}_{meeting['start_time']}_{meeting['location']}"
                     if event_key in added_events:
                         continue
                     added_events.add(event_key)
                     
                     # Create event
                     event = Event()
-                    event.add('summary', course_name)
+                    event.add('summary', section_name)  # Use section name for summary
                     
                     # Add detailed description
                     description = (
-                        f"Course: {course_name}\n"
+                        f"Section: {section_name}\n"
                         f"Type: {course_type}\n"
-                        f"Section: {section}\n"
                         f"Location: {meeting['location']}\n"
                         f"Instructor: {instructor}"
                     )
@@ -471,7 +469,7 @@ def generate_ics_calendar(df, term_start, term_end, selected_term):
                     cal.add_component(event)
                     
                 except Exception as event_error:
-                    print(f"Error creating event for {course_name}: {event_error}")
+                    print(f"Error creating event for {section_name}: {event_error}")
                     continue
                     
         except Exception as course_error:
